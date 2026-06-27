@@ -12,7 +12,7 @@ SITE_DIR = REPO_DIR / "knottest.framer.website"
 GITHUB_URL = "https://github.com/smmd999/knot-site.git"
 
 # These files live in the repo root and should never be overwritten
-PRESERVE = ["vercel.json", ".git"]
+PRESERVE = ["vercel.json", ".git", "deploy-knot.py", "favicon-dark.png", "favicon-light.png", "og-image.png"]
 # ─────────────────────────────────────────────────────
 
 def get_httrack_folder():
