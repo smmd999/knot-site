@@ -46,6 +46,13 @@ def copy_new_export(source: Path):
             shutil.copytree(item, dest, dirs_exist_ok=True)
         else:
             shutil.copy2(item, dest)
+    # Copy framerusercontent.com from parent HTTrack folder into site
+    fuc = source.parent / "framerusercontent.com"
+    if fuc.exists():
+        shutil.copytree(fuc, SITE_DIR / "framerusercontent.com", dirs_exist_ok=True)
+        print("  ✅ framerusercontent.com assets copied")
+    else:
+        print("  ⚠️  framerusercontent.com folder not found in HTTrack export")
 
 def copy_assets():
     print("🖼  Copying favicons and OG image...")
@@ -68,10 +75,12 @@ def remove_framer_badge(content: str) -> str:
 
 def inject_head_tags(content: str) -> str:
     inject = (
-        '\n  <link rel="icon" href="/favicon-dark.png" media="(prefers-color-scheme: light)">'
-        '\n  <link rel="icon" href="/favicon-light.png" media="(prefers-color-scheme: dark)">'
-        '\n  <meta property="og:image" content="/og-image.png">'
-    )
+    '\n  <link rel="icon" href="/favicon-dark.png" media="(prefers-color-scheme: light)">'
+    '\n  <link rel="icon" href="/favicon-light.png" media="(prefers-color-scheme: dark)">'
+    '\n  <meta property="og:image" content="/og-image.png">'
+    '\n  <script async src="https://www.googletagmanager.com/gtag/js?id=G-L1XD8L660K"></script>'
+    '\n  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag("js",new Date());gtag("config","G-L1XD8L660K");</script>'
+)
     # Remove any existing favicon / og:image tags Framer may have added
     content = re.sub(r'<link[^>]*rel=["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]*>\n?', '', content)
     content = re.sub(r'<meta[^>]*property=["\']og:image["\'][^>]*>\n?', '', content)
