@@ -1,5 +1,4 @@
 {
-  "rewrites": [
-    { "source": "/((?!.*\\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|json|txt|xml|webp)$).*)", "destination": "/$1.html" }
-  ]
+  "cleanUrls": true,
+  "trailingSlash": false
 }
