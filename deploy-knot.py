@@ -9,6 +9,7 @@ from pathlib import Path
 REPO_DIR = Path(r"C:\Users\nhadi\Downloads\knot-site")
 SITE_DIR = REPO_DIR / "knottest.framer.website"
 GA_ID = "G-L1XD8L660K"
+SITE_DOMAIN = "https://knotdesign.ca"
 
 # HTTrack truncates version numbers in filenames (e.g. knot-ai-2.0 → knot-ai-2)
 # Add any affected slugs here as { truncated_path: correct_path }
@@ -105,7 +106,6 @@ def remove_framer_badge(content: str) -> str:
 
 
 def inject_head_tags(content: str) -> str:
-    # NOTE: no <base href="/"> here — it breaks Framer's internal URL router
     inject = (
         '\n  <link rel="icon" href="/favicon-dark.png" media="(prefers-color-scheme: light)">'
         '\n  <link rel="icon" href="/favicon-light.png" media="(prefers-color-scheme: dark)">'
@@ -122,14 +122,29 @@ def inject_head_tags(content: str) -> str:
 def fix_asset_paths(content: str) -> str:
     # Fix framerusercontent relative paths at any depth
     content = re.sub(r'(\.\./)+framerusercontent\.com/', '/framerusercontent.com/', content)
-    # Fix relative paths to JS/CSS/font assets so deep pages (/works/slug) load correctly
-    # Converts src="../../_framer/chunk.js" → src="/_framer/chunk.js"
-    # Leaves page navigation hrefs like ../../about untouched (no file extension)
+
+    # Fix relative paths to JS/CSS/font assets so deep pages load correctly on hard refresh
     content = re.sub(
         r'((?:src|href)=")(\.\./)+([^"]*\.(?:js|mjs|css|woff2?|ttf|eot)(?:[?#][^"]*)?)"',
         r'\1/\3"',
         content
     )
+
+    # Fix relative canonical URLs — Framer's router reads these to determine the current
+    # route and crashes with "Invalid URL" if they're relative on deep pages like /works/slug
+    content = re.sub(
+        r'<link rel="canonical" href="(?!http)([^"]*)"',
+        lambda m: f'<link rel="canonical" href="{SITE_DOMAIN}/{m.group(1).lstrip("/")}\"',
+        content
+    )
+
+    # Rewrite og:url from framer.app domain to knotdesign.ca
+    content = re.sub(
+        r'<meta property="og:url" content="https://[^/]+/([^"]*)"',
+        rf'<meta property="og:url" content="{SITE_DOMAIN}/\1"',
+        content
+    )
+
     return content
 
 
