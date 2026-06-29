@@ -19,14 +19,18 @@ def get_httrack_folder():
     print("\n📂 Drag and drop your new HTTrack export folder here, then hit Enter:")
     raw = input("  > ").strip().strip('"')
     path = Path(raw)
-    # Find the knottest.framer.website folder inside it
-    candidate = path / "knottest.framer.website"
-    if candidate.exists():
-        return candidate
-    # Maybe they dragged the inner folder directly
-    if (path / "index.html").exists():
+
+    # Look for any .framer.website or .framer.app subfolder
+    for item in path.iterdir():
+        if item.is_dir() and ("framer.website" in item.name or "framer.app" in item.name):
+            print(f"  ✅ Found site folder: {item.name}")
+            return item
+
+    # Fallback — if they dragged the site folder itself
+    if (path / "index.html").exists() and not (path / "hts-log.txt").exists():
         return path
-    print("❌ Couldn't find knottest.framer.website inside that folder. Try again.")
+
+    print("❌ Couldn't find a Framer site folder inside that export. Try again.")
     sys.exit(1)
 
 def clean_site_dir():
