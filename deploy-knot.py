@@ -1,4 +1,3 @@
-import os
 import re
 import shutil
 import subprocess
@@ -10,14 +9,15 @@ from pathlib import Path
 REPO_DIR = Path(r"C:\Users\nhadi\Downloads\knot-site")
 SITE_DIR = REPO_DIR / "knottest.framer.website"
 GA_ID = "G-L1XD8L660K"
+
+# HTTrack truncates version numbers in filenames (e.g. knot-ai-2.0 → knot-ai-2)
+# Add any affected slugs here as { truncated_path: correct_path }
+FILENAME_FIXES = {
+    "changelog/knot-ai-2.html": "changelog/knot-ai-2.0.html",
+}
 # ─────────────────────────────────────────────────────
 
-# Files inside SITE_DIR that should never be deleted on clean
 PRESERVE_IN_SITE = {"vercel.json", ".git"}
-
-# Files in REPO_DIR root that the script should never touch
-PRESERVE_IN_REPO = {"vercel.json", ".git", "deploy-knot.py",
-                    "favicon-dark.png", "favicon-light.png", "og-image.png"}
 
 
 def get_httrack_folder() -> Path:
@@ -29,19 +29,17 @@ def get_httrack_folder() -> Path:
         print(f"❌ Path not found: {path}")
         sys.exit(1)
 
-    # Look for any .framer.website or .framer.app subfolder
     for item in sorted(path.iterdir()):
         if item.is_dir() and ("framer.website" in item.name or "framer.app" in item.name):
             print(f"  ✅ Found site folder: {item.name}")
             return item
 
-    # Fallback — maybe they dragged the inner Framer folder directly
     if (path / "index.html").exists() and not (path / "hts-log.txt").exists():
         print(f"  ✅ Using folder directly: {path.name}")
         return path
 
     print("❌ Couldn't find a Framer site folder inside that export.")
-    print("   Make sure you're dragging the folder HTTrack created, not a subfolder.")
+    print("   Drag the folder HTTrack created, not a subfolder.")
     sys.exit(1)
 
 
@@ -67,7 +65,6 @@ def copy_new_export(source: Path):
         else:
             shutil.copy2(item, dest)
 
-    # framerusercontent.com sits one level up from the Framer subfolder in HTTrack output
     fuc = source.parent / "framerusercontent.com"
     if fuc.exists():
         shutil.copytree(fuc, SITE_DIR / "framerusercontent.com", dirs_exist_ok=True)
@@ -78,13 +75,24 @@ def copy_new_export(source: Path):
 
 def copy_assets():
     print("🖼  Copying favicons and OG image...")
-    assets = ["favicon-dark.png", "favicon-light.png", "og-image.png"]
-    for asset in assets:
+    for asset in ["favicon-dark.png", "favicon-light.png", "og-image.png"]:
         src = REPO_DIR / asset
         if src.exists():
             shutil.copy2(src, SITE_DIR / asset)
         else:
             print(f"  ⚠️  {asset} not found in repo root — skipping")
+
+
+def fix_truncated_filenames():
+    print("🔧 Fixing truncated filenames...")
+    for wrong, correct in FILENAME_FIXES.items():
+        src = SITE_DIR / wrong
+        dest = SITE_DIR / correct
+        if src.exists():
+            src.rename(dest)
+            print(f"  ✅ Renamed {wrong} → {correct}")
+        else:
+            print(f"  ⚠️  {wrong} not found — skipping rename")
 
 
 def remove_framer_badge(content: str) -> str:
@@ -98,13 +106,14 @@ def remove_framer_badge(content: str) -> str:
 
 def inject_head_tags(content: str) -> str:
     inject = (
+        # base href fixes relative path breakage on deep pages like /works/slug
+        '\n  <base href="/">'
         '\n  <link rel="icon" href="/favicon-dark.png" media="(prefers-color-scheme: light)">'
         '\n  <link rel="icon" href="/favicon-light.png" media="(prefers-color-scheme: dark)">'
         '\n  <meta property="og:image" content="/og-image.png">'
         f'\n  <script async src="https://www.googletagmanager.com/gtag/js?id={GA_ID}"></script>'
         f'\n  <script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag("js",new Date());gtag("config","{GA_ID}");</script>'
     )
-    # Strip any existing favicon / og:image tags Framer injected
     content = re.sub(r'<link[^>]*rel=["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]*>\n?', '', content)
     content = re.sub(r'<meta[^>]*property=["\']og:image["\'][^>]*>\n?', '', content)
     content = content.replace("</head>", inject + "\n</head>", 1)
@@ -112,8 +121,9 @@ def inject_head_tags(content: str) -> str:
 
 
 def fix_asset_paths(content: str) -> str:
-    # HTTrack uses relative paths that break on the root page
-    return content.replace('../framerusercontent.com/', '/framerusercontent.com/')
+    # Fix framerusercontent relative paths at any depth
+    content = re.sub(r'(\.\./)+framerusercontent\.com/', '/framerusercontent.com/', content)
+    return content
 
 
 def process_html_files():
@@ -161,6 +171,7 @@ def main():
     clean_site_dir()
     copy_new_export(source)
     copy_assets()
+    fix_truncated_filenames()
     process_html_files()
     git_push()
 
