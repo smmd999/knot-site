@@ -105,9 +105,8 @@ def remove_framer_badge(content: str) -> str:
 
 
 def inject_head_tags(content: str) -> str:
+    # NOTE: no <base href="/"> here — it breaks Framer's internal URL router
     inject = (
-        # base href fixes relative path breakage on deep pages like /works/slug
-        '\n  <base href="/">'
         '\n  <link rel="icon" href="/favicon-dark.png" media="(prefers-color-scheme: light)">'
         '\n  <link rel="icon" href="/favicon-light.png" media="(prefers-color-scheme: dark)">'
         '\n  <meta property="og:image" content="/og-image.png">'
@@ -123,6 +122,14 @@ def inject_head_tags(content: str) -> str:
 def fix_asset_paths(content: str) -> str:
     # Fix framerusercontent relative paths at any depth
     content = re.sub(r'(\.\./)+framerusercontent\.com/', '/framerusercontent.com/', content)
+    # Fix relative paths to JS/CSS/font assets so deep pages (/works/slug) load correctly
+    # Converts src="../../_framer/chunk.js" → src="/_framer/chunk.js"
+    # Leaves page navigation hrefs like ../../about untouched (no file extension)
+    content = re.sub(
+        r'((?:src|href)=")(\.\./)+([^"]*\.(?:js|mjs|css|woff2?|ttf|eot)(?:[?#][^"]*)?)"',
+        r'\1/\3"',
+        content
+    )
     return content
 
 
