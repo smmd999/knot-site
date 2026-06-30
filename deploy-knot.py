@@ -152,10 +152,11 @@ def process_html_files():
     html_files = list(SITE_DIR.rglob("*.html"))
     print(f"⚙️  Processing {len(html_files)} HTML files...")
     for filepath in html_files:
+        relative_path = filepath.relative_to(SITE_DIR)
         content = filepath.read_text(encoding="utf-8", errors="ignore")
         content = remove_framer_badge(content)
         content = inject_head_tags(content)
-        content = fix_asset_paths(content)
+        content = fix_asset_paths(content, relative_path)
         filepath.write_text(content, encoding="utf-8")
     print(f"  ✅ Done — {len(html_files)} files processed")
 
