@@ -12,7 +12,6 @@ GA_ID = "G-L1XD8L660K"
 SITE_DOMAIN = "https://knotdesign.ca"
 
 # HTTrack truncates version numbers in filenames (e.g. knot-ai-2.0 → knot-ai-2)
-# Add any affected slugs here as { truncated_path: correct_path }
 FILENAME_FIXES = {
     "changelog/knot-ai-2.html": "changelog/knot-ai-2.0.html",
 }
@@ -119,7 +118,7 @@ def inject_head_tags(content: str) -> str:
     return content
 
 
-def fix_asset_paths(content: str) -> str:
+def fix_asset_paths(content: str, relative_path: Path) -> str:
     # Fix framerusercontent relative paths at any depth
     content = re.sub(r'(\.\./)+framerusercontent\.com/', '/framerusercontent.com/', content)
 
@@ -130,11 +129,29 @@ def fix_asset_paths(content: str) -> str:
         content
     )
 
-    # Fix relative canonical URLs — Framer's router reads these to determine the current
-    # route and crashes with "Invalid URL" if they're relative on deep pages like /works/slug
+    # Fix relative canonical URLs using the file's REAL location on disk, not a blind
+    # domain-prepend. A relative href like "gutfix.html" on a page at work/gutfix.html
+    # must resolve to /work/gutfix.html — dropping the folder breaks Framer's router
+    # (it reads canonical to determine its own route) and causes Invalid URL crashes.
+    def replace_canonical(m):
+        href = m.group(1)
+        if href.startswith("http"):
+            return m.group(0)
+        page_dir = relative_path.parent
+        resolved = (page_dir / href).as_posix()
+        parts = []
+        for part in resolved.split("/"):
+            if part == "..":
+                if parts:
+                    parts.pop()
+            elif part not in (".", ""):
+                parts.append(part)
+        clean_path = "/".join(parts)
+        return f'<link rel="canonical" href="{SITE_DOMAIN}/{clean_path}"'
+
     content = re.sub(
-        r'<link rel="canonical" href="(?!http)([^"]*)"',
-        lambda m: f'<link rel="canonical" href="{SITE_DOMAIN}/{m.group(1).lstrip("/")}\"',
+        r'<link rel="canonical" href="([^"]*)"',
+        replace_canonical,
         content
     )
 
