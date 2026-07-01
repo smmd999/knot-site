@@ -165,6 +165,26 @@ def fix_asset_paths(content: str, relative_path: Path) -> str:
     return content
 
 
+def strip_broken_srcset(content: str) -> str:
+    """
+    HTTrack sometimes saves the different quality-size versions of an image
+    under mismatched filenames (e.g. one ends in ...80703.png, the full-size
+    one ends in ...888ac.png — same picture, different broken filenames), and
+    also mangles the &amp; separators inside the srcset list (writes them as
+    &amp;amp; instead of &amp;). Browsers can't reliably parse a broken list
+    like that and silently fall back to the smallest/blurriest image option.
+
+    Fix: remove the "sizes" and "srcset" attributes entirely from every image,
+    so each image just loads its single full-quality "src" every time.
+    This trades away picking a smaller image for tiny screens, which doesn't
+    matter for a small site's gallery images, in exchange for guaranteed
+    full quality with zero ambiguity.
+    """
+    content = re.sub(r'\s+sizes="[^"]*"', '', content)
+    content = re.sub(r'\s+srcset="[^"]*"', '', content)
+    return content
+
+
 def process_html_files():
     html_files = list(SITE_DIR.rglob("*.html"))
     print(f"⚙️  Processing {len(html_files)} HTML files...")
@@ -174,6 +194,7 @@ def process_html_files():
         content = remove_framer_badge(content)
         content = inject_head_tags(content)
         content = fix_asset_paths(content, relative_path)
+        content = strip_broken_srcset(content)
         filepath.write_text(content, encoding="utf-8")
     print(f"  ✅ Done — {len(html_files)} files processed")
 
