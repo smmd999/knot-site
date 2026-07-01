@@ -111,6 +111,36 @@ def inject_head_tags(content: str) -> str:
         '\n  <meta property="og:image" content="/og-image.png">'
         f'\n  <script async src="https://www.googletagmanager.com/gtag/js?id={GA_ID}"></script>'
         f'\n  <script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}gtag("js",new Date());gtag("config","{GA_ID}");</script>'
+        # Framer's own client-side JS re-renders <img> tags after the page loads
+        # (this happens on a hard refresh specifically), and re-adds a broken
+        # srcset/sizes list even after we've stripped it from the static HTML.
+        # This watcher keeps stripping it back off every time Framer's JS
+        # tries to re-add it, so images always stay at full quality.
+        '\n  <script>'
+        '(function(){'
+        'function stripBadAttrs(img){'
+        'if(img.hasAttribute("srcset")){img.removeAttribute("srcset");}'
+        'if(img.hasAttribute("sizes")){img.removeAttribute("sizes");}'
+        '}'
+        'document.querySelectorAll("img").forEach(stripBadAttrs);'
+        'var mo=new MutationObserver(function(mutations){'
+        'mutations.forEach(function(m){'
+        'if(m.type==="attributes"&&(m.attributeName==="srcset"||m.attributeName==="sizes")&&m.target.tagName==="IMG"){'
+        'stripBadAttrs(m.target);'
+        '}'
+        'if(m.type==="childList"){'
+        'm.addedNodes.forEach(function(n){'
+        'if(n.nodeType===1){'
+        'if(n.tagName==="IMG"){stripBadAttrs(n);}'
+        'n.querySelectorAll&&n.querySelectorAll("img").forEach(stripBadAttrs);'
+        '}'
+        '});'
+        '}'
+        '});'
+        '});'
+        'mo.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["srcset","sizes"]});'
+        '})();'
+        '</script>'
     )
     content = re.sub(r'<link[^>]*rel=["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]*>\n?', '', content)
     content = re.sub(r'<meta[^>]*property=["\']og:image["\'][^>]*>\n?', '', content)
