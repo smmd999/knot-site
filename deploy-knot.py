@@ -12,14 +12,17 @@ REPO_DIR = Path(r"C:\Users\nhadi\Downloads\knot-site")
 SITE_DIR = REPO_DIR / "knottest.framer.website"
 GA_ID = "G-L1XD8L660K"
 SITE_DOMAIN = "https://knotdesign.ca"
-
-# HTTrack truncates version numbers in filenames (e.g. knot-ai-2.0 → knot-ai-2)
-FILENAME_FIXES = {
-    "changelog/knot-ai-2.html": "changelog/knot-ai-2.0.html",
-}
 # ─────────────────────────────────────────────────────
 
 PRESERVE_IN_SITE = {"vercel.json", ".git"}
+
+# HTTrack embeds the real URL path in a comment, e.g.
+# <!-- Mirrored from spicy-step-903793.framer.app/changelog/knot-ai-3.0 by HTTrack ... -->
+# even when it saves the file as knot-ai-3.html (strips .0 as a fake extension).
+MIRRORED_FROM_RE = re.compile(
+    r"<!-- Mirrored from [^/\s]+/(\S+?) by HTTrack",
+    re.IGNORECASE,
+)
 
 
 def get_httrack_folder() -> Path:
@@ -86,15 +89,61 @@ def copy_assets():
 
 
 def fix_truncated_filenames():
+    """
+    HTTrack treats trailing .0 / .1 / etc as file extensions and strips them
+    from saved filenames (knot-ai-3.0 → knot-ai-3.html). The real slug is
+    still in the 'Mirrored from' HTML comment — use that to rename, and
+    rewrite any href/src that still points at the truncated name.
+    """
     print("🔧 Fixing truncated filenames...")
-    for wrong, correct in FILENAME_FIXES.items():
-        src = SITE_DIR / wrong
-        dest = SITE_DIR / correct
-        if src.exists():
-            src.rename(dest)
-            print(f"  ✅ Renamed {wrong} → {correct}")
-        else:
-            print(f"  ⚠️  {wrong} not found — skipping rename")
+    renames: list[tuple[Path, Path]] = []
+
+    for filepath in SITE_DIR.rglob("*.html"):
+        head = filepath.read_text(encoding="utf-8", errors="ignore")[:4000]
+        match = MIRRORED_FROM_RE.search(head)
+        if not match:
+            continue
+
+        real_slug = match.group(1).rstrip("/")  # e.g. changelog/knot-ai-3.0
+        expected = SITE_DIR / f"{real_slug}.html"
+        if filepath.resolve() == expected.resolve():
+            continue
+        if filepath.parent != expected.parent:
+            rel = filepath.relative_to(SITE_DIR)
+            print(f"  ⚠️  Skipping {rel} — Mirrored path folder doesn't match on-disk folder")
+            continue
+        renames.append((filepath, expected))
+
+    if not renames:
+        print("  ✅ No truncated filenames found")
+        return
+
+    link_rewrites: list[tuple[str, str]] = []
+    for src, dest in renames:
+        rel_src = src.relative_to(SITE_DIR).as_posix()
+        rel_dest = dest.relative_to(SITE_DIR).as_posix()
+        if dest.exists():
+            print(f"  ⚠️  Target already exists ({rel_dest}) — skipping {rel_src}")
+            continue
+        src.rename(dest)
+        print(f"  ✅ Renamed {rel_src} → {rel_dest}")
+        link_rewrites.append((src.name, dest.name))
+
+    if not link_rewrites:
+        return
+
+    # HTTrack also rewrites in-page links to the truncated filename
+    fixed_files = 0
+    for filepath in SITE_DIR.rglob("*.html"):
+        content = filepath.read_text(encoding="utf-8", errors="ignore")
+        updated = content
+        for old_name, new_name in link_rewrites:
+            updated = updated.replace(old_name, new_name)
+        if updated != content:
+            filepath.write_text(updated, encoding="utf-8")
+            fixed_files += 1
+    if fixed_files:
+        print(f"  ✅ Rewrote truncated links in {fixed_files} HTML files")
 
 
 def fetch_404_page(framer_host: str):
@@ -223,30 +272,15 @@ def fix_asset_paths(content: str, relative_path: Path) -> str:
         content
     )
 
-    # Fix relative canonical URLs using the file's REAL location on disk, not a blind
-    # domain-prepend. A relative href like "gutfix.html" on a page at work/gutfix.html
-    # must resolve to /work/gutfix.html — dropping the folder breaks Framer's router
-    # (it reads canonical to determine its own route) and causes Invalid URL crashes.
-    def replace_canonical(m):
-        href = m.group(1)
-        if href.startswith("http"):
-            return m.group(0)
-        page_dir = relative_path.parent
-        resolved = (page_dir / href).as_posix()
-        parts = []
-        for part in resolved.split("/"):
-            if part == "..":
-                if parts:
-                    parts.pop()
-            elif part not in (".", ""):
-                parts.append(part)
-        clean_path = "/".join(parts)
-        return f'<link rel="canonical" href="{SITE_DOMAIN}/{clean_path}"'
-
+    # Canonical must match the real route. Use the on-disk path (after truncation
+    # renames) — HTTrack also truncates relative canonical hrefs (e.g. writes
+    # knot-ai-3.html inside a page that should be /changelog/knot-ai-3.0).
+    disk_path = relative_path.as_posix()
     content = re.sub(
-        r'<link rel="canonical" href="([^"]*)"',
-        replace_canonical,
-        content
+        r'<link rel="canonical" href="[^"]*"',
+        f'<link rel="canonical" href="{SITE_DOMAIN}/{disk_path}"',
+        content,
+        count=1,
     )
 
     # Rewrite og:url from framer.app domain to knotdesign.ca
