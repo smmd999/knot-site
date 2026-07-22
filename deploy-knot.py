@@ -3,6 +3,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 # ─────────────────────────────────────────────────────
 # CONFIG — only change these if you move things around
@@ -95,13 +97,75 @@ def fix_truncated_filenames():
             print(f"  ⚠️  {wrong} not found — skipping rename")
 
 
+def fetch_404_page(framer_host: str):
+    """
+    HTTrack refuses to save Framer's /404 page because Framer correctly returns
+    HTTP 404 with the custom HTML body. Download it ourselves (keeping the body
+    even on 404) so Vercel can serve it as 404.html.
+    """
+    print("📥 Fetching custom 404 page from Framer...")
+    url = f"https://{framer_host}/404"
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; KnotDeploy/1.0)"})
+    try:
+        with urlopen(req, timeout=60) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+    except HTTPError as e:
+        # Framer intentionally returns status 404 with the designed page body
+        if e.code == 404:
+            html = e.read().decode("utf-8", errors="ignore")
+        else:
+            print(f"  ❌ Failed to fetch 404 page: HTTP {e.code}")
+            sys.exit(1)
+    except URLError as e:
+        print(f"  ❌ Failed to fetch 404 page: {e.reason}")
+        sys.exit(1)
+
+    if len(html) < 1000:
+        print("  ❌ 404 response looked empty — aborting so we don't push a broken page")
+        sys.exit(1)
+
+    dest = SITE_DIR / "404.html"
+    dest.write_text(html, encoding="utf-8")
+    print(f"  ✅ Saved 404.html ({len(html):,} bytes) from {url}")
+
+
 def remove_framer_badge(content: str) -> str:
-    return re.sub(
-        r'<div id="__framer-badge-container">.*?</div>\s*</div>',
-        '',
-        content,
-        flags=re.DOTALL
-    )
+    """
+    Remove the Made in Framer badge by deleting the entire balanced
+    #__framer-badge-container tree.
+
+    A naive non-greedy regex only matches through the first nested
+    </div></div> pair, which leaves the rest of the badge DOM behind
+    (especially on curl'd pages like 404.html). Walk div depth instead.
+    """
+    marker = '<div id="__framer-badge-container">'
+    start = content.find(marker)
+    if start == -1:
+        return content
+
+    j = start
+    depth = 0
+    while j < len(content):
+        if content.startswith("</div>", j):
+            depth -= 1
+            j += 6
+            if depth == 0:
+                end = j
+                while end < len(content) and content[end] in " \t\r\n":
+                    end += 1
+                return content[:start] + content[end:]
+            continue
+        # Count real <div ...> opens (not </div>)
+        if content.startswith("<div", j):
+            nxt = content[j + 4 : j + 5]
+            if nxt in (" ", ">", "\n", "\t", "\r"):
+                depth += 1
+                j += 4
+                continue
+        j += 1
+
+    # Unbalanced markup — leave content unchanged rather than corrupt the page
+    return content
 
 
 def inject_head_tags(content: str) -> str:
@@ -263,6 +327,9 @@ def main():
     copy_new_export(source)
     copy_assets()
     fix_truncated_filenames()
+    # Must run after clean/copy (those wipe the site folder) and before
+    # process_html_files so 404.html gets badge/favicon/GA/path fixes too.
+    fetch_404_page(source.name)
     process_html_files()
     git_push()
 
